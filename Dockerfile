@@ -2,56 +2,34 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install essential packages and dependencies needed for Playwright
+# 1. Install system dependencies (Root)
 RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    procps \
-    unzip \
-    # Additional dependencies that Playwright might need
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    wget gnupg ca-certificates procps unzip curl \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+    libxrandr2 libgbm1 libasound2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# 2. Install Python requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# 3. Install Playwright (STILL AS ROOT)
+# This ensures it can install any missing system-level libraries
+RUN python -m playwright install --with-deps chromium
+
+# 4. Copy app and set permissions
 COPY . .
-
-# Create a data directory with proper permissions
 RUN mkdir -p /app/data && chmod 777 /app/data
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser:appuser /app
 
-# Expose the port the app runs on
-EXPOSE 8000
-
-# Create a non-root user to run the app
-RUN adduser --disabled-password --gecos "" appuser
-# Give appuser permissions to the necessary directories
-RUN chown -R appuser:appuser /app
-
-# Switch to appuser before installing browsers
+# 5. Switch to non-root for security
 USER appuser
 
-# Install Playwright browsers
-RUN playwright install
+EXPOSE 8000
 
-# Set healthcheck to ensure the service is running properly
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD curl -f http://localhost:8000/api/v1/ping || exit 1
+# Healthcheck uses 'curl' which we added to the apt-get list above
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -f http://localhost:8000/api/v1/ping || exit 1
 
-# Command to run the application
-CMD ["python", "app.py"] 
+CMD ["python", "app.py"]
